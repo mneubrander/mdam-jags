@@ -321,7 +321,6 @@ sample_data_for_mice$r3 = is_missing_x3
 sample_data_for_mice$r4 = is_missing_x4
 sample_data_for_mice$r5 = is_missing_x5
 sample_data_for_mice$r6 = is_missing_x6
-  
 ```
 
 ```{r}
@@ -346,7 +345,6 @@ V_x2_pop_HT <- sum((tmp$x2 / (1/tmp$W))^2 * (1 - (1/tmp$W)))
 
 ```{r}
 # data for jags 
-
 X <- as.matrix(sample_data[, c("x1", "x2", "x3", "x4", "x5", "x6")])
 
 jags_data <- list()
