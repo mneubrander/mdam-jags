@@ -1,0 +1,629 @@
+---
+title: "jags_item"
+author: "marie"
+date: "2025-10-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reshape2) # For melt
+library(ggplot2)
+library(tidyr) # For pivot_longer
+library(dplyr) # For group_by and summarize
+library(scales) # For percent_format
+
+library(mice)
+library(tidyverse)
+
+```
+
+
+## data generation
+
+Generate and sample data!
+
+#### population
+
+```{r}
+set.seed(456)
+
+df <- read.csv("../2022ACS.csv")
+N_pop <- nrow(df)
+
+
+# Set true coefficients for the data generation
+
+a1 <- 0.2; b1w <- -0.005
+a2 <- -0.5; b21 <- 1.2
+a3 <- 0.2; b31 <- -0.8; b32 <- 0.9
+a4 <- -0.3; b41 <- 0.5; b42 <- -0.5; b43 <- 1.1
+a5 <- 10; b51 <- 2; b52 <- -1.5; b53 <- 1; b54 <- -1; s5 <- 3
+a6 <- 5; b61 <- 1; b62 <- 0.5; b63 <- -1; b64 <- 0.8; b65 <- 0.5; s6 <- 4
+
+# Generate population data sequentially
+
+pop_data <- data.frame(id = 1:N_pop)
+pop_data$W <- 10*df$PWGTP
+#pop_data$W <- runif(N_pop, 1, 1)
+pop_data$sampling_prob <- 1/pop_data$W
+
+pop_data$x1 <- rbinom(N_pop, 1, plogis(a1 + b1w * pop_data$W))
+pop_data$x2 <- rbinom(N_pop, 1, plogis(a2 + b21*pop_data$x1))
+pop_data$x3 <- rbinom(N_pop, 1, plogis(a3 + b31*pop_data$x1 + b32*pop_data$x2))
+pop_data$x4 <- rbinom(N_pop, 1, plogis(a4 + b41*pop_data$x1 + b42*pop_data$x2 + b43*pop_data$x3))
+pop_data$x5 <- rnorm(N_pop, a5 + b51*pop_data$x1 + b52*pop_data$x2 + b53*pop_data$x3 + b54*pop_data$x4, s5)
+pop_data$x6 <- rnorm(N_pop, a6 + b61*pop_data$x1 + b62*pop_data$x2 + b63*pop_data$x3 + b64*pop_data$x4 + b65*pop_data$x5, s6)
+```
+
+
+#### sample
+```{r}
+sample_indices <- which(runif(N_pop) < pop_data$sampling_prob)
+sample_data <- pop_data[sample_indices, ]
+```
+
+```{r}
+T1_known = sum(pop_data$x1)
+T1_samp = sum(sample_data$x1 * 1/sample_data$sampling_prob)
+
+T2_known = sum(pop_data$x2)
+T2_samp = sum(sample_data$x2 * 1/sample_data$sampling_prob)
+
+T3_known = sum(pop_data$x3)
+T3_samp = sum(sample_data$x3 * 1/sample_data$sampling_prob)
+
+T4_known = sum(pop_data$x4)
+T4_samp = sum(sample_data$x4 * 1/sample_data$sampling_prob)
+
+T5_known = sum(pop_data$x5)
+T5_samp = sum(sample_data$x5 * 1/sample_data$sampling_prob)
+
+T6_known = sum(pop_data$x6)
+T6_samp = sum(sample_data$x6 * 1/sample_data$sampling_prob)
+```
+
+```{r}
+sample_data_for_viz <- sample_data
+```
+
+
+#### missingness
+
+```{r}
+
+# Generate Item Nonresponse with Vectorized, Full Models 
+# Create a matrix of the predictor variables for efficient calculations
+
+X_matrix <- as.matrix(sample_data[, c("x1", "x2", "x3", "x4", "x5", "x6")])
+
+# Define VECTORIZED coefficients for each missingness model
+# MNAR models (6 predictors each)
+nr_int_1 <- -0.2; nr_beta_1 <- c(0., 0.2, 0.2, 0.1, 0.1, 0.05) # x1 is the first coef
+nr_int_2 <- 0.5; nr_beta_2 <- c(0.1, 0.7, 0.1, 0.1, -0.2, -0.1) # x2 is the second coef
+
+# MAR models (5 predictors each, excluding the variable itself)
+nr_int_3 <- -2.0; nr_beta_3 <- c(0.6, 0.4, 0.2, 0.1, -0.05)   # No coef for x3
+nr_int_4 <- -1.8; nr_beta_4 <- c(0.3, 0.2, 0.1, 0.1, 0.05)    # No coef for x4
+nr_int_5 <- -2.1; nr_beta_5 <- c(0.7, 0.2, 0.3, -0.3, 0.02)   # No coef for x5
+nr_int_6 <- -2.3; nr_beta_6 <- c(0.4, 0.4, 0.1, -0.1, 0.1)    # No coef for x6
+
+# MNAR : x1 and x2
+logit_p_miss_x1 <- nr_int_1 + X_matrix %*% nr_beta_1
+p_miss_x1 <- plogis(logit_p_miss_x1)
+is_missing_x1 <- rbinom(nrow(sample_data), 1, p_miss_x1)
+sample_data$x1[is_missing_x1 == 1] <- NA
+
+logit_p_miss_x2 <- nr_int_2 + X_matrix %*% nr_beta_2
+p_miss_x2 <- plogis(logit_p_miss_x2)
+is_missing_x2 <- rbinom(nrow(sample_data), 1, p_miss_x2)
+sample_data$x2[is_missing_x2 == 1] <- NA
+
+# MAR for x3, x4, x5, x6
+logit_p_miss_x3 <- nr_int_3 + X_matrix[, -3] %*% nr_beta_3
+p_miss_x3 <- plogis(logit_p_miss_x3)
+is_missing_x3 <- rbinom(nrow(sample_data), 1, p_miss_x3)
+sample_data$x3[is_missing_x3 == 1] <- NA
+
+logit_p_miss_x4 <- nr_int_4 + X_matrix[, -4] %*% nr_beta_4
+p_miss_x4 <- plogis(logit_p_miss_x4)
+is_missing_x4 <- rbinom(nrow(sample_data), 1, p_miss_x4)
+sample_data$x4[is_missing_x4 == 1] <- NA
+
+logit_p_miss_x5 <- nr_int_5 + X_matrix[, -5] %*% nr_beta_5
+p_miss_x5 <- plogis(logit_p_miss_x5)
+is_missing_x5 <- rbinom(nrow(sample_data), 1, p_miss_x5)
+sample_data$x5[is_missing_x5 == 1] <- NA
+
+logit_p_miss_x6 <- nr_int_6 + X_matrix[, -6] %*% nr_beta_6
+p_miss_x6 <- plogis(logit_p_miss_x6)
+is_missing_x6 <- rbinom(nrow(sample_data), 1, p_miss_x6)
+sample_data$x6[is_missing_x6 == 1] <- NA
+```
+
+#### visualize some data and missingness!
+```{r}
+# We will save all original values and indicators in new columns
+sample_data_viz <- sample_data_for_viz %>%
+  mutate(
+    # --- Store Original Values ---
+    x1_orig = x1,
+    x2_orig = x2,
+    x3_orig = x3,
+    x4_orig = x4,
+    x5_orig = x5,
+    x6_orig = x6,
+
+    # --- Generate Missingness Indicators ---
+    # MNAR: x1 and x2
+    logit_p_miss_x1 = nr_int_1 + X_matrix %*% nr_beta_1,
+    p_miss_x1 = plogis(logit_p_miss_x1),
+    is_missing_x1 = rbinom(n(), 1, p_miss_x1),
+    
+    logit_p_miss_x2 = nr_int_2 + X_matrix %*% nr_beta_2,
+    p_miss_x2 = plogis(logit_p_miss_x2),
+    is_missing_x2 = rbinom(n(), 1, p_miss_x2),
+    
+    # MAR: x3, x4, x5, x6
+    logit_p_miss_x3 = nr_int_3 + X_matrix[, -3] %*% nr_beta_3,
+    p_miss_x3 = plogis(logit_p_miss_x3),
+    is_missing_x3 = rbinom(n(), 1, p_miss_x3),
+    
+    logit_p_miss_x4 = nr_int_4 + X_matrix[, -4] %*% nr_beta_4,
+    p_miss_x4 = plogis(logit_p_miss_x4),
+    is_missing_x4 = rbinom(n(), 1, p_miss_x4),
+    
+    logit_p_miss_x5 = nr_int_5 + X_matrix[, -5] %*% nr_beta_5,
+    p_miss_x5 = plogis(logit_p_miss_x5),
+    is_missing_x5 = rbinom(n(), 1, p_miss_x5),
+    
+    logit_p_miss_x6 = nr_int_6 + X_matrix[, -6] %*% nr_beta_6,
+    p_miss_x6 = plogis(logit_p_miss_x6),
+    is_missing_x6 = rbinom(n(), 1, p_miss_x6)
+  )
+
+# --- NOW, apply missingness to the original columns ---
+sample_data_viz$x1[sample_data_viz$is_missing_x1 == 1] <- NA
+sample_data_viz$x2[sample_data_viz$is_missing_x2 == 1] <- NA
+sample_data_viz$x3[sample_data_viz$is_missing_x3 == 1] <- NA
+sample_data_viz$x4[sample_data_viz$is_missing_x4 == 1] <- NA
+sample_data_viz$x5[sample_data_viz$is_missing_x5 == 1] <- NA
+sample_data_viz$x6[sample_data_viz$is_missing_x6 == 1] <- NA
+
+# --- Plot 1: Missingness Proportion for Binary Variables (x1-x4) ---
+# This directly answers: "are there more x1 = 1 that are missing vs x1 = 0?"
+
+# Prepare data: pivot to long format
+plot_data_binary <- sample_data_viz %>%
+  select(id, x1_orig, x2_orig, x3_orig, x4_orig, 
+         is_missing_x1, is_missing_x2, is_missing_x3, is_missing_x4) %>%
+  pivot_longer(
+    cols = starts_with("x"),
+    names_to = "variable",
+    values_to = "original_value",
+    names_pattern = "(x[1-4])_orig"
+  ) %>%
+  pivot_longer(
+    cols = starts_with("is_missing"),
+    names_to = "missing_variable",
+    values_to = "is_missing",
+    names_pattern = "is_missing_(x[1-4])"
+  ) %>%
+  # Keep only matching pairs
+  filter(variable == missing_variable) %>%
+  select(-missing_variable)
+
+# Calculate proportions
+plot_data_binary_agg <- plot_data_binary %>%
+  group_by(variable, original_value) %>%
+  summarize(prop_missing = mean(is_missing, na.rm = TRUE, .groups = "drop")) %>%
+  ungroup()
+
+# Plot
+ggplot(plot_data_binary_agg, 
+       aes(x = factor(original_value), y = prop_missing, fill = factor(original_value))) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ variable) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Proportion of Missing Values by Original Value (Binary Vars)",
+    x = "Original Value",
+    y = "Proportion Missing",
+    fill = "Original Value"
+  ) +
+  theme_minimal()
+
+
+# --- Plot 2: Missingness Distribution for Continuous Variables (x5-x6) ---
+# This shows the *distribution* of original values for missing vs. observed
+
+plot_data_continuous <- sample_data_viz %>%
+  select(id, x5_orig, x6_orig, is_missing_x5, is_missing_x6) %>%
+  pivot_longer(
+    cols = c(x5_orig, x6_orig),
+    names_to = "variable",
+    values_to = "original_value",
+    names_pattern = "(x[5-6])_orig"
+  ) %>%
+  pivot_longer(
+    cols = c(is_missing_x5, is_missing_x6),
+    names_to = "missing_variable",
+    values_to = "is_missing",
+    names_pattern = "is_missing_(x[5-6])"
+  ) %>%
+  filter(variable == missing_variable) %>%
+  select(-missing_variable)
+
+# Plot
+ggplot(plot_data_continuous, 
+       aes(x = original_value, fill = factor(is_missing, labels = c("Observed", "Missing")))) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~ variable, scales = "free") +
+  labs(
+    title = "Distribution of Original Values by Missingness Status (Continuous Vars)",
+    x = "Original Value",
+    y = "Density",
+    fill = "Status"
+  ) +
+  theme_minimal()
+
+
+
+# Correlation matrix of indicators
+cor_matrix <- sample_data_viz %>%
+  select(starts_with("is_missing_")) %>%
+  cor()
+
+# Melt for ggplot
+melted_cor_matrix <- melt(cor_matrix)
+
+ggplot(melted_cor_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), 
+                       name = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(title = "Correlation of Missingness Indicators")
+
+
+# --- Plot 4: Specific Joint Pattern (e.g., x1 vs. x2) ---
+# How does the original value of x1 relate to x2 being missing?
+
+plot_data_joint <- sample_data_viz %>%
+  group_by(x1_orig) %>%
+  summarize(prop_miss_x2 = mean(is_missing_x2, na.rm = TRUE, .groups = "drop")) 
+
+ggplot(plot_data_joint, 
+       aes(x = factor(x1_orig), y = prop_miss_x2, fill = factor(x1_orig))) +
+  geom_col() +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Probability of x2 being Missing, given x1's Original Value",
+    x = "Original Value of x1",
+    y = "Proportion of x2 Missing",
+    fill = "x1 Value"
+  ) +
+  theme_minimal()
+```
+
+
+## MICE imputations
+
+```{r}
+sample_data_for_mice <- sample_data |> 
+  select(W, x1, x2, x3, x4, x5, x6) 
+
+sample_data_for_mice$r1 = is_missing_x1
+sample_data_for_mice$r2 = is_missing_x2
+sample_data_for_mice$r3 = is_missing_x3
+sample_data_for_mice$r4 = is_missing_x4
+sample_data_for_mice$r5 = is_missing_x5
+sample_data_for_mice$r6 = is_missing_x6
+  
+```
+
+```{r}
+sample_imp = mice(sample_data_for_mice, m = 500)
+all_completed_data <- complete(sample_imp, "long")
+sum_stats <- all_completed_data %>%
+  group_by(.imp) %>%
+  summarize(sx1 = sum(W * x1), sx2 =  sum(W * x2),  sx3 = sum(W * x3), 
+            sx4 =  sum(W * x4),
+            sx5 =  sum(W * x5), sx6 =  sum(W * x6))
+```
+
+## JAGS imputations
+
+```{r}
+# estimate variance
+tmp <- complete(mice(sample_data |> select(W, x1, x2, x3, x4, x5, x6), m = 1, seed = 1))
+V_x1_pop_HT <- sum((tmp$x1 / (1/tmp$W))^2 * (1 - (1/tmp$W)))
+V_x2_pop_HT <- sum((tmp$x2 / (1/tmp$W))^2 * (1 - (1/tmp$W)))
+```
+#### prepare jags data
+
+```{r}
+# data for jags 
+
+X <- as.matrix(sample_data[, c("x1", "x2", "x3", "x4", "x5", "x6")])
+
+jags_data <- list()
+jags_data$X <- X 
+jags_data$N <- nrow(jags_data$X)
+jags_data$W <- sample_data$W
+jags_data$R <- 1*!is.na(X)
+
+jags_data$T1_known <- sum(pop_data$x1)
+jags_data$T2_known <- sum(pop_data$x2)
+jags_data$V1_known <- V_x1_pop_HT
+jags_data$V2_known <- V_x2_pop_HT
+
+```
+
+```{r}
+# jags model setup
+params_to_save <- c(
+  paste0("alpha", 1:6), "beta1w",
+  paste0("beta2", 1),
+  paste0("beta3", 1:2),
+  paste0("beta4", 1:3),
+  paste0("beta5", 1:4),
+  paste0("beta6", 1:5),
+  paste0("sigma", 5:6),
+  paste0("tau",   5:6),
+  
+  # Non-response model priors
+  paste0("nr_int_", 1:6),
+  paste0("nr_beta_1_", 1:6),
+  paste0("nr_beta_2_", 1:6),
+  paste0("nr_beta_3_", 1:5),
+  paste0("nr_beta_4_", 1:5),
+  paste0("nr_beta_5_", 1:5),
+  paste0("nr_beta_6_", 1:5),
+  
+  # totals
+  "T1_imputed_total", "T2_imputed_total", "T3_imputed_total", 
+  "T4_imputed_total", "T5_imputed_total", "T6_imputed_total"
+)
+
+# inits 
+# Load the mice library if it's not already
+library(mice)
+
+# --- FINAL, CORRECTED inits_function ---
+inits_function <- function() {
+  # 1. Generate a smart, complete dataset using mice
+  mice_imp <- mice(jags_data$X, m = 1, maxit = 5, printFlag = FALSE)
+  X_mice_complete <- complete(mice_imp)
+  X_mice_numeric <- do.call(cbind, lapply(X_mice_complete, as.numeric))
+  
+  # 2. Create an initial value matrix that is NA everywhere
+  X_init <- matrix(NA, nrow = nrow(jags_data$X), ncol = ncol(jags_data$X))
+  
+  # 3. Find out which cells were originally missing
+  is_missing <- is.na(jags_data$X)
+  
+  # 4. Copy the smart starting values from mice into X_init, but ONLY for the missing cells
+  X_init[is_missing] <- X_mice_numeric[is_missing]
+  
+  # Return the list. This X_init matrix now has numbers for the missing
+  # values and NAs for the observed values, which is what JAGS expects.
+  return(list(X = X_init))
+}
+
+```
+
+#### run sampler - fit params
+
+```{r}
+
+# The jags() call remains the same
+jags_fit_item <- jagsUI::jags(
+  data = jags_data,
+  inits = inits_function,
+  parameters.to.save = params_to_save,
+  model.file = "item_nonresponse_model.bug",
+  n.chains = 3,
+  n.adapt = 1000,
+  n.iter = 2000,
+  n.burnin = 500,
+  parallel = TRUE
+)
+
+# Check results
+print(jags_fit_item, digits = 3)
+```
+#### run sampler - reconstruct data sets
+
+```{r}
+# --- Generate 100 Imputations ---
+# Now that the model is converged, run 100 more iterations 
+# from where it left off and ONLY save the "X" matrix.
+jags_imputations <- update(
+  jags_fit_item, 
+  parameters.to.save = "X",
+  n.iter = 100,
+  n.thin = 1
+)
+```
+
+
+```{r}
+imputed_values_array <- jags_imputations$sims.list$X
+original_data <- jags_data$X
+
+M <- jags_imputations$mcmc.info$n.samples 
+
+is_missing <- is.na(original_data)
+complete_datasets_list <- vector("list", M)
+
+for (i in 1:M) {
+  temp_data <- original_data
+  imputed_slice <- imputed_values_array[i, , ]
+  temp_data[is_missing] <- imputed_slice[is_missing]
+  complete_datasets_list[[i]] <- temp_data
+}
+
+all_jags_completed_data <- lapply(seq_along(complete_datasets_list), function(i) {
+  df <- as.data.frame(complete_datasets_list[[i]])
+  names(df) <- c("x1", "x2", "x3", "x4", "x5", "x6")
+  df$.imp <- i
+  df$.id <- 1:nrow(df)
+  df$W <- jags_data$W
+  df
+})
+
+all_jags_completed_data <- do.call(rbind, all_jags_completed_data)
+```
+
+
+## PLOTS
+
+#### using MICE
+
+```{r}
+# --- Plot sx1 ---
+data1 <- sum_stats$sx1
+line1_red <- T1_known
+line1_blue <- T1_samp
+plot_xlim1 <- range(c(data1, line1_red, line1_blue ), na.rm = TRUE)
+
+hist(data1,
+     xlim = plot_xlim1, # <-- Fix
+     xlab = "Sum of x1",
+     main = "Histogram of sx1")
+abline(v = line1_red, col = "red")
+abline(v = line1_blue, col = "blue")
+
+# --- Plot sx2 ---
+data2 <- sum_stats$sx2
+line2_red <- T2_known
+line2_blue <- T2_samp
+plot_xlim2 <- range(c(data2, line2_red, line2_blue), na.rm = TRUE)
+
+hist(data2,
+     xlim = plot_xlim2, # <-- Fix
+     xlab = "Sum of x2",
+     main = "Histogram of sx2")
+abline(v = line2_red, col = "red")
+abline(v = line2_blue, col = "blue")
+
+# --- Plot sx3 ---
+data3 <- sum_stats$sx3
+line3_red <- T3_known
+line3_blue <- T3_samp
+plot_xlim3 <- range(c(data3, line3_blue, line3_red), na.rm = TRUE)
+
+hist(data3,
+     xlim = plot_xlim3, # <-- Fix
+     xlab = "Sum of x3",
+     main = "Histogram of sx3")
+abline(v = line3_red, col = "red")
+abline(v = line3_blue, col = "blue")
+
+# --- Plot sx4 ---
+data4 <- sum_stats$sx4
+line4_red <- T4_known
+line4_blue <- T4_samp
+plot_xlim4 <- range(c(data4, line4_red, line4_blue), na.rm = TRUE)
+
+hist(data4,
+     xlim = plot_xlim4, # <-- Fix
+     xlab = "Sum of x4",
+     main = "Histogram of sx4")
+abline(v = line4_red, col = "red")
+abline(v = line4_blue, col = "blue")
+
+# --- Plot sx5 ---
+data5 <- sum_stats$sx5
+line5_red <- T5_known
+line5_blue <- T5_samp
+plot_xlim5 <- range(c(data5, line5_red, line5_blue), na.rm = TRUE)
+
+hist(data5,
+     xlim = plot_xlim5, # <-- Fix
+     xlab = "Sum of x5",
+     main = "Histogram of sx5")
+abline(v = line5_red, col = "red")
+abline(v = line5_blue, col = "blue")
+
+# --- Plot sx6 ---
+data6 <- sum_stats$sx6
+line6_red <- T6_known
+line6_blue <- T6_samp
+plot_xlim6 <- range(c(data6, line6_blue, line6_red), na.rm = TRUE)
+
+hist(data6,
+     xlim = plot_xlim6, # <-- Fix
+     xlab = "Sum of x6",
+     main = "Histogram of sx6")
+abline(v = line6_red, col = "red")
+abline(v = line6_blue, col = "blue")
+```
+
+#### jags imputations
+
+```{r}
+# --- Plot T1 ---
+data1 <- jags_fit_item$sims.list$T1_imputed_total
+
+hist(data1,
+     xlab = "Imputed Total T1",
+     col = "lightblue",
+     xlim = plot_xlim1) # Set x-axis limits
+abline(v = line1_red, col = "red")
+abline(v = line1_blue, col = "blue")
+
+# --- Plot T2 ---
+data2 <- jags_fit_item$sims.list$T2_imputed_total
+
+hist(data2,
+     xlab = "Imputed Total T2",
+     col = "lightblue",
+     xlim = plot_xlim2) # Set x-axis limits
+abline(v = line2_red, col = "red")
+abline(v = line2_blue, col = "blue")
+
+# --- Plot T3 ---
+data3 <- jags_fit_item$sims.list$T3_imputed_total
+
+hist(data3,
+     xlab = "Imputed Total T3",
+     col = "lightblue",
+     xlim = plot_xlim3) # Set x-axis limits
+abline(v = line3_red, col = "red")
+abline(v = line3_blue, col = "blue")
+
+# --- Plot T4 ---
+data4 <- jags_fit_item$sims.list$T4_imputed_total
+
+hist(data4,
+     xlab = "Imputed Total T4",
+     col = "lightblue",
+     xlim = plot_xlim4) # Set x-axis limits
+abline(v = line4_red, col = "red")
+abline(v = line4_blue, col = "blue")
+
+# --- Plot T5 ---
+data5 <- jags_fit_item$sims.list$T5_imputed_total
+
+hist(data5,
+     xlab = "Imputed Total T5",
+     col = "lightblue",
+     xlim = plot_xlim5) # Set x-axis limits
+abline(v = line5_red, col = "red")
+abline(v = line5_blue, col = "blue")
+
+# --- Plot T6 ---
+data6 <- jags_fit_item$sims.list$T6_imputed_total
+
+hist(data6,
+     xlab = "Imputed Total T6",
+     col = "lightblue",
+     xlim = plot_xlim6) # Set x-axis limits
+abline(v = line6_red, col = "red")
+abline(v = line6_blue, col = "blue")
+```
+

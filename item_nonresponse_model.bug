@@ -1,0 +1,87 @@
+# File: item_nonresponse_model.bug
+
+model {
+  # --- Priors ---
+  # Data model priors
+  alpha1 ~ dnorm(0, 1/5^2); beta1w ~ dnorm(0, 1/5^2)
+  alpha2 ~ dnorm(0, 1/5^2); beta21 ~ dnorm(0, 1/5^2)
+  alpha3 ~ dnorm(0, 1/5^2); beta31 ~ dnorm(0, 1/5^2); beta32 ~ dnorm(0, 1/5^2)
+  alpha4 ~ dnorm(0, 1/5^2); beta41 ~ dnorm(0, 1/5^2); beta42 ~ dnorm(0, 1/5^2); beta43 ~ dnorm(0, 1/5^2)
+  alpha5 ~ dnorm(0, 1/5^2); beta51 ~ dnorm(0, 1/5^2); beta52 ~ dnorm(0, 1/5^2); beta53 ~ dnorm(0, 1/5^2); beta54 ~ dnorm(0, 1/5^2)
+  sigma5 ~ dunif(0, 100); tau5 <- 1 / sigma5^2
+  alpha6 ~ dnorm(0, 1/5^2); beta61 ~ dnorm(0, 1/5^2); beta62 ~ dnorm(0, 1/5^2); beta63 ~ dnorm(0, 1/5^2); beta64 ~ dnorm(0, 1/5^2); beta65 ~ dnorm(0, 1/5^2)
+  sigma6 ~ dunif(0, 100); tau6 <- 1 / sigma6^2
+
+  # Non-response model priors (vectorized)
+  nr_int_1 ~ dnorm(0, 1/5^2); for(i in 1:6) { nr_beta_1[i] ~ dnorm(0, 1/2^2) }
+  nr_int_2 ~ dnorm(0, 1/5^2); for(i in 1:6) { nr_beta_2[i] ~ dnorm(0, 1/2^2) }
+  nr_int_3 ~ dnorm(0, 1/5^2); for(i in 1:5) { nr_beta_3[i] ~ dnorm(0, 1/2^2) }
+  nr_int_4 ~ dnorm(0, 1/5^2); for(i in 1:5) { nr_beta_4[i] ~ dnorm(0, 1/2^2) }
+  nr_int_5 ~ dnorm(0, 1/5^2); for(i in 1:5) { nr_beta_5[i] ~ dnorm(0, 1/2^2) }
+  nr_int_6 ~ dnorm(0, 1/5^2); for(i in 1:5) { nr_beta_6[i] ~ dnorm(0, 1/2^2) }
+
+
+  # --- Likelihood Loop ---
+  # This single loop handles everything: observed data, imputation, and the non-response model.
+  for (n in 1:N) {
+  
+    # 1. Data Model P(X)
+    # If X[n,j] is NA, JAGS samples it. If it's a value, JAGS uses it as data.
+    
+    logit(p1[n]) <- alpha1 + beta1w * W[n]
+    X[n, 1] ~ dbern(p1[n])
+
+    logit(p2[n]) <- alpha2 + beta21 * X[n, 1]
+    X[n, 2] ~ dbern(p2[n])
+    
+    logit(p3[n]) <- alpha3 + beta31 * X[n, 1] + beta32 * X[n, 2]
+    X[n, 3] ~ dbern(p3[n])
+    
+    logit(p4[n]) <- alpha4 + beta41 * X[n, 1] + beta42 * X[n, 2] + beta43 * X[n, 3]
+    X[n, 4] ~ dbern(p4[n])
+ 
+    mu5[n] <- alpha5 + beta51 * X[n, 1] + beta52 * X[n, 2] + beta53 * X[n, 3] + beta54 * X[n, 4]
+    X[n, 5] ~ dnorm(mu5[n], tau5)
+
+    mu6[n] <- alpha6 + beta61 * X[n, 1] + beta62 * X[n, 2] + beta63 * X[n, 3] + beta64 * X[n, 4] + beta65 * X[n, 5]
+    X[n, 6] ~ dnorm(mu6[n], tau6)
+
+    # 2. Non-Response Model P(R|X) - REVISED SECTION
+    # First, model the probability of MISSINGNESS (p_miss) directly, matching the data generation.
+    
+    # MNAR models (depend on all X's)
+    logit(p_miss1[n]) <- nr_int_1 + inprod(nr_beta_1[], X[n,])
+    logit(p_miss2[n]) <- nr_int_2 + inprod(nr_beta_2[], X[n,])
+
+    # MAR models (depend on all OTHER X's)
+    logit(p_miss3[n]) <- nr_int_3 + nr_beta_3[1]*X[n,1] + nr_beta_3[2]*X[n,2] + nr_beta_3[3]*X[n,4] + nr_beta_3[4]*X[n,5] + nr_beta_3[5]*X[n,6]
+    logit(p_miss4[n]) <- nr_int_4 + nr_beta_4[1]*X[n,1] + nr_beta_4[2]*X[n,2] + nr_beta_4[3]*X[n,3] + nr_beta_4[4]*X[n,5] + nr_beta_4[5]*X[n,6]
+    logit(p_miss5[n]) <- nr_int_5 + nr_beta_5[1]*X[n,1] + nr_beta_5[2]*X[n,2] + nr_beta_5[3]*X[n,3] + nr_beta_5[4]*X[n,4] + nr_beta_5[5]*X[n,6]
+    logit(p_miss6[n]) <- nr_int_6 + nr_beta_6[1]*X[n,1] + nr_beta_6[2]*X[n,2] + nr_beta_6[3]*X[n,3] + nr_beta_6[4]*X[n,4] + nr_beta_6[5]*X[n,5]
+
+    # Second, link to the response indicator R.
+    # The probability of being OBSERVED (R[n,j]=1) is (1 - p_miss).
+    R[n, 1] ~ dbern(1 - p_miss1[n])
+    R[n, 2] ~ dbern(1 - p_miss2[n])
+    R[n, 3] ~ dbern(1 - p_miss3[n])
+    R[n, 4] ~ dbern(1 - p_miss4[n])
+    R[n, 5] ~ dbern(1 - p_miss5[n])
+    R[n, 6] ~ dbern(1 - p_miss6[n])
+  }
+  
+  # --- Margin Constraints ---
+  # inprod() is the dot product. It works on the complete X matrix (observed + imputed).
+  T1_expected <- inprod(X[,1], W)
+  T2_expected <- inprod(X[,2], W)
+  
+  T1_known ~ dnorm(T1_expected, 1/V1_known)
+  T2_known ~ dnorm(T2_expected, 1/V2_known)
+  
+  # --- Generated Quantities ---
+  T1_imputed_total <- T1_expected
+  T2_imputed_total <- T2_expected
+  T3_imputed_total <- inprod(X[,3], W)
+  T4_imputed_total <- inprod(X[,4], W)
+  T5_imputed_total <- inprod(X[,5], W)
+  T6_imputed_total <- inprod(X[,6], W)
+}

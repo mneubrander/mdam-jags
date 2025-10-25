@@ -1,0 +1,152 @@
+---
+title: "jags_unit"
+author: "marie"
+date: "2025-10-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+set.seed(123)
+N_pop <- 100000
+
+#  Set true coefficients for the data generation 
+
+# Define true parameters for the X1 ~ weight model
+a1 <- 0.2     # True intercept for X1
+b1w <- -0.005 # True coefficient for the effect of weight on X1
+
+# Coefficients for subsequent variables (unchanged)
+# X2 ~ X1
+a2 <- -0.5; b21 <- 1.2
+
+# X3 ~ X1 + X2
+a3 <- 0.2; b31 <- -0.8; b32 <- 0.9
+
+# X4 ~ X1 + X2 + X3
+a4 <- -0.3; b41 <- 0.5; b42 <- -0.5; b43 <- 1.1
+
+# X5 ~ X1 + X2 + X3 + X4
+a5 <- 10; b51 <- 2; b52 <- -1.5; b53 <- 1; b54 <- -1
+s5 <- 3
+
+# X6 ~ X1 + X2 + X3 + X4 + X5
+a6 <- 5; b61 <- 1; b62 <- 0.5; b63 <- -1; b64 <- 0.8; b65 <- 0.5
+s6 <- 4
+
+#  Generate population data sequentially 
+pop_data <- data.frame(id = 1:N_pop)
+
+# CHANGED: Generate weights for the population FIRST, so they can be used as a predictor
+pop_data$sampling_prob <- runif(N_pop, 0.005, 0.015)
+pop_data$weight <- 1 / pop_data$sampling_prob
+
+# CHANGED: Generate X1 based on the new model including weights
+logit_p_x1 <- a1 + b1w * pop_data$weight
+p_x1 <- plogis(logit_p_x1)
+pop_data$X1 <- rbinom(N_pop, 1, p_x1)
+
+# The rest of the variables are generated as before
+pop_data$X2 <- rbinom(N_pop, 1, plogis(a2 + b21*pop_data$X1))
+pop_data$X3 <- rbinom(N_pop, 1, plogis(a3 + b31*pop_data$X1 + b32*pop_data$X2))
+pop_data$X4 <- rbinom(N_pop, 1, plogis(a4 + b41*pop_data$X1 + b42*pop_data$X2 + b43*pop_data$X3))
+pop_data$X5 <- rnorm(N_pop, a5 + b51*pop_data$X1 + b52*pop_data$X2 + b53*pop_data$X3 + b54*pop_data$X4, s5)
+pop_data$X6 <- rnorm(N_pop, a6 + b61*pop_data$X1 + b62*pop_data$X2 + b63*pop_data$X3 + b64*pop_data$X4 + b65*pop_data$X5, s6)
+
+#  Sampling and MNAR Non-response (this part is unchanged) 
+sample_indices <- sample(1:N_pop, size = 1000, prob = pop_data$sampling_prob)
+sample_data <- pop_data[sample_indices, ]
+
+logit_p_nonresp <- -1.5 + 0.8 * sample_data$X1 + 0.8 * sample_data$X2
+p_nonresp <- plogis(logit_p_nonresp)
+sample_data$is_nonresp <- rbinom(nrow(sample_data), 1, p_nonresp)
+
+#  Split into respondents and nonrespondents (this part is unchanged) 
+resp_data <- subset(sample_data, is_nonresp == 0)
+nonresp_data <- subset(sample_data, is_nonresp == 1)
+```
+
+```{r}
+# --- 1. Load Library and Prepare Data ---
+library(jagsUI)
+
+# We assume 'resp_data' and 'nonresp_data' dataframes already exist
+
+# Create the data list for JAGS
+jags_data <- list(
+  N_resp = nrow(resp_data),
+  N_nonresp = nrow(nonresp_data),
+  
+  # Observed data for respondents
+  X1_resp = resp_data$X1,
+  X2_resp = resp_data$X2,
+  X3_resp = resp_data$X3,
+  X4_resp = resp_data$X4,
+  X5_resp = resp_data$X5,
+  X6_resp = resp_data$X6,
+  
+  # Weights
+  W_resp = resp_data$weight,
+  W_nonresp = nonresp_data$weight,
+  
+  # Create the response indicator variables (vectors of 1s and 0s)
+  U_resp = rep(1, nrow(resp_data)),
+  U_nonresp = rep(0, nrow(nonresp_data)),
+
+  # Margin constraints
+  T1_known = sum(pop_data$X1),
+  T2_known = sum(pop_data$X2),
+  V1_known = 1e6,
+  V2_known = 1e6
+)
+
+# --- 2. Set up JAGS Run ---
+
+# Parameters to monitor
+params_to_save <- c(
+  "alpha1", "beta1w", "alpha2", "beta21",
+  "T1_imputed_total", "T2_imputed_total", "T3_imputed_total",
+  "T4_imputed_total", "T5_imputed_total", "T6_imputed_total"
+)
+
+# --- 3. Run JAGS ---
+jags_fit_unit <- jagsUI::jags(
+  data = jags_data,
+  parameters.to.save = params_to_save,
+  # CHANGED: Point to your new model file instead of using a string
+  model.file = "unit_nonresponse_model.bug", 
+  n.chains = 3,
+  n.adapt = 1000,
+  n.iter = 5000,
+  n.burnin = 2000,
+  parallel = TRUE
+)
+
+# --- 4. Check Results ---
+print(jags_fit_unit, digits = 3)
+```
+```{r}
+hist(jags_fit_unit$sims.list$T1_imputed_total,
+     xlab = "Imputed Total",
+     col = "lightblue")
+
+abline(v = jags_data$T1_known, col = "red", lwd = 2)
+
+hist(jags_fit_unit$sims.list$T2_imputed_total,
+     xlab = "Imputed Total",
+     col = "lightblue")
+     
+abline(v = jags_data$T2_known, col = "red", lwd = 2)
+
+true_total_x5 <- sum(pop_data$X5)
+
+hist(jags_fit_unit$sims.list$T5_imputed_total,
+     xlab = "Imputed Total",
+     col = "lightblue")
+     
+abline(v = true_total_x5, col = "red", lwd = 2)
+```
+

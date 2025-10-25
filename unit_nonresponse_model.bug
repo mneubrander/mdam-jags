@@ -1,0 +1,86 @@
+# File: unit_nonresponse_model.bug
+
+model {
+  # --- Priors ---
+  # Data model priors
+  alpha1 ~ dnorm(0, 1/5^2); beta1w ~ dnorm(0, 1/5^2)
+  alpha2 ~ dnorm(0, 1/5^2); beta21 ~ dnorm(0, 1/5^2)
+  alpha3 ~ dnorm(0, 1/5^2); beta31 ~ dnorm(0, 1/5^2); beta32 ~ dnorm(0, 1/5^2)
+  alpha4 ~ dnorm(0, 1/5^2); beta41 ~ dnorm(0, 1/5^2); beta42 ~ dnorm(0, 1/5^2); beta43 ~ dnorm(0, 1/5^2)
+  alpha5 ~ dnorm(0, 1/5^2); beta51 ~ dnorm(0, 1/5^2); beta52 ~ dnorm(0, 1/5^2); beta53 ~ dnorm(0, 1/5^2); beta54 ~ dnorm(0, 1/5^2)
+  sigma5 ~ dunif(0, 100); tau5 <- 1 / sigma5^2
+  alpha6 ~ dnorm(0, 1/5^2); beta61 ~ dnorm(0, 1/5^2); beta62 ~ dnorm(0, 1/5^2); beta63 ~ dnorm(0, 1/5^2); beta64 ~ dnorm(0, 1/5^2); beta65 ~ dnorm(0, 1/5^2)
+  sigma6 ~ dunif(0, 100); tau6 <- 1 / sigma6^2
+
+  # Non-response model priors
+  beta_nr_0 ~ dnorm(0, 1/5^2)
+  beta_nr_1 ~ dnorm(0, 1/5^2)
+  beta_nr_2 ~ dnorm(0, 1/5^2)
+
+  # --- Likelihood for Respondents (U=1) ---
+  for (n in 1:N_resp) {
+    # Data model P(X_obs)
+    logit(p1_resp[n]) <- alpha1 + beta1w * W_resp[n]
+    X1_resp[n] ~ dbern(p1_resp[n])
+    
+    logit(p2_resp[n]) <- alpha2 + beta21 * X1_resp[n]
+    X2_resp[n] ~ dbern(p2_resp[n])
+    
+    logit(p3_resp[n]) <- alpha3 + beta31 * X1_resp[n] + beta32 * X2_resp[n]
+    X3_resp[n] ~ dbern(p3_resp[n])
+    
+    logit(p4_resp[n]) <- alpha4 + beta41 * X1_resp[n] + beta42 * X2_resp[n] + beta43 * X3_resp[n]
+    X4_resp[n] ~ dbern(p4_resp[n])
+    
+    mu5_resp[n] <- alpha5 + beta51 * X1_resp[n] + beta52 * X2_resp[n] + beta53 * X3_resp[n] + beta54 * X4_resp[n]
+    X5_resp[n] ~ dnorm(mu5_resp[n], tau5)
+    
+    mu6_resp[n] <- alpha6 + beta61 * X1_resp[n] + beta62 * X2_resp[n] + beta63 * X3_resp[n] + beta64 * X4_resp[n] + beta65 * X5_resp[n]
+    X6_resp[n] ~ dnorm(mu6_resp[n], tau6)
+    
+    # Non-response model P(U=1|X_obs)
+    logit(p_resp[n]) <- beta_nr_0 + beta_nr_1 * X1_resp[n] + beta_nr_2 * X2_resp[n]
+    U_resp[n] ~ dbern(p_resp[n]) # U_resp is a vector of 1s
+  }
+
+  # --- Imputation Model for Non-Respondents (U=0) ---
+  for (n in 1:N_nonresp) {
+    # Data model P(X_mis)
+    logit(p1_mis[n]) <- alpha1 + beta1w * W_nonresp[n]
+    X1_mis[n] ~ dbern(p1_mis[n])
+    
+    logit(p2_mis[n]) <- alpha2 + beta21 * X1_mis[n]
+    X2_mis[n] ~ dbern(p2_mis[n])
+    
+    logit(p3_mis[n]) <- alpha3 + beta31 * X1_mis[n] + beta32 * X2_mis[n]
+    X3_mis[n] ~ dbern(p3_mis[n])
+    
+    logit(p4_mis[n]) <- alpha4 + beta41 * X1_mis[n] + beta42 * X2_mis[n] + beta43 * X3_mis[n]
+    X4_mis[n] ~ dbern(p4_mis[n])
+    
+    mu5_mis[n] <- alpha5 + beta51 * X1_mis[n] + beta52 * X2_mis[n] + beta53 * X3_mis[n] + beta54 * X4_mis[n]
+    X5_mis[n] ~ dnorm(mu5_mis[n], tau5)
+    
+    mu6_mis[n] <- alpha6 + beta61 * X1_mis[n] + beta62 * X2_mis[n] + beta63 * X3_mis[n] + beta64 * X4_mis[n] + beta65 * X5_mis[n]
+    X6_mis[n] ~ dnorm(mu6_mis[n], tau6)
+    
+    # Non-response model P(U=0|X_mis)
+    logit(p_nonresp[n]) <- beta_nr_0 + beta_nr_1 * X1_mis[n] + beta_nr_2 * X2_mis[n]
+    U_nonresp[n] ~ dbern(p_nonresp[n]) # U_nonresp is a vector of 0s
+  }
+  
+  # --- Margin Constraints ---
+  T1_expected <- inprod(X1_resp, W_resp) + inprod(X1_mis, W_nonresp)
+  T2_expected <- inprod(X2_resp, W_resp) + inprod(X2_mis, W_nonresp)
+  
+  T1_known ~ dnorm(T1_expected, 1/V1_known)
+  T2_known ~ dnorm(T2_expected, 1/V2_known)
+  
+  # --- Generated Quantities ---
+  T1_imputed_total <- T1_expected
+  T2_imputed_total <- T2_expected
+  T3_imputed_total <- inprod(X3_resp, W_resp) + inprod(X3_mis, W_nonresp)
+  T4_imputed_total <- inprod(X4_resp, W_resp) + inprod(X4_mis, W_nonresp)
+  T5_imputed_total <- inprod(X5_resp, W_resp) + inprod(X5_mis, W_nonresp)
+  T6_imputed_total <- inprod(X6_resp, W_resp) + inprod(X6_mis, W_nonresp)
+}
