@@ -1,0 +1,101 @@
+--- JOB START ---
+Job is running in directory:
+/hpc/home/mn141/dctrl_mn141/mdam-jags
+---
+Attempting to run with Rscript...
+[1] "Loading libraries"
+[1] "Libraries loaded"
+[1] "n_samp: 1"
+[1] "L: 2"
+[1] "n_chains: 1"
+[1] "n_burnin: 10"
+[1] "n_iter: 20"
+[1] "CSV path: 2022ACS"
+[1] "Pop params path: params-pop-1"
+[1] "Missingness params path: missingness_params-1"
+[1] "Creating results folder: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20"
+[1] "Saving population data to: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20/population_data.rds"
+[1] "Using 1 cores for parallel processing"
+[1] "JAGS will use 1 chains internally"
+[1] "Processing sample 1 on process 46095"
+
+ iter imp variable
+  1   1  x1  x2  x3  x4  x5  x6
+  1   2  x1  x2  x3  x4  x5  x6
+  2   1  x1  x2  x3  x4  x5  x6
+  2   2  x1  x2  x3  x4  x5  x6
+  3   1  x1  x2  x3  x4  x5  x6
+  3   2  x1  x2  x3  x4  x5  x6
+  4   1  x1  x2  x3  x4  x5  x6
+  4   2  x1  x2  x3  x4  x5  x6
+  5   1  x1  x2  x3  x4  x5  x6
+  5   2  x1  x2  x3  x4  x5  x6
+
+ iter imp variable
+  1   1  x1  x2  x3  x4  x5  x6
+  2   1  x1  x2  x3  x4  x5  x6
+  3   1  x1  x2  x3  x4  x5  x6
+  4   1  x1  x2  x3  x4  x5  x6
+  5   1  x1  x2  x3  x4  x5  x6
+
+Processing function input....... 
+
+Done. 
+ 
+Compiling model graph
+   Resolving undeclared variables
+   Allocating nodes
+Graph information:
+   Observed stochastic nodes: 66230
+   Unobserved stochastic nodes: 14450
+   Total graph size: 407974
+
+Initializing model
+
+Adaptive phase, 1000 iterations x 1 chains 
+If no progress bar appears JAGS has decided not to adapt 
+ 
+
+ Burn-in phase, 10 iterations x 1 chains 
+ 
+
+Sampling from joint posterior, 10 iterations x 1 chains 
+ 
+
+Calculating statistics....... 
+
+Done. 
+[1] "Saving JAGS summary for sample 1 to: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20/jags_summary_samp_1.csv"
+Compiling model graph
+   Resolving undeclared variables
+   Allocating nodes
+Graph information:
+   Observed stochastic nodes: 66230
+   Unobserved stochastic nodes: 14450
+   Total graph size: 407974
+
+Initializing model
+
+Adaptive phase..... 
+Adaptive phase complete 
+ 
+No burn-in specified 
+ 
+Sampling from joint posterior, 2 iterations x 1 chains 
+ 
+
+Calculating statistics....... 
+
+Done. 
+[1] "Stored 2 JAGS imputations for sample 1"
+[1] "Generating plots for sample 1"
+[1] "Plots saved to: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20/imputation_plots_samp_1.pdf"
+[1] "Saving SAMPLES list..."
+[1] "SAMPLES saved to: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20/samples_list.rds"
+[1] "Saving MICE_RESULTS list..."
+[1] "MICE_RESULTS saved to: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20/mice_results_list.rds"
+[1] "Saving JAGS_RESULTS list..."
+[1] "JAGS_RESULTS saved to: pop-params-pop-1-miss-missingness_params-1-n_samp-1-L-2-data-2022ACS-chains-1-burnin-10-iter-20/jags_results_list.rds"
+[1] "All results saved successfully!"
+[1] "Script completed at: 2025-10-26 13:05:34.447884"
+--- JOB SUCCESS ---

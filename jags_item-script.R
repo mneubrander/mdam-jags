@@ -15,6 +15,7 @@
 # 8: n_iter (e.g., 2000)
 
 # Load required libraries
+print("Loading libraries")
 library(reshape2) # For melt
 library(ggplot2)
 library(tidyr) # For pivot_longer
@@ -24,6 +25,7 @@ library(mice)
 library(tidyverse)
 library(parallel)
 library(jagsUI)
+print("Libraries loaded")
 
 # Read command line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -52,6 +54,7 @@ print(paste("Missingness params path:", miss_params_path))
 set.seed(456)
 
 df <- read.csv(paste0("data/",csv_path, ".csv"))
+N_pop <- nrow(df)
 param_list_pop <- readRDS(paste0("params/",pop_params_path,".rds"))
 params_miss <- readRDS(paste0("params/", miss_params_path,".rds"))
 
@@ -87,20 +90,7 @@ T4_known = sum(pop_data$x4)
 T5_known = sum(pop_data$x5)
 T6_known = sum(pop_data$x6)
 
-# Initialize function for JAGS
-inits_function <- function() {
-  mice_imp <- mice(jags_data$X, m = 1, maxit = 5, printFlag = FALSE)
-  X_mice_complete <- complete(mice_imp)
-  X_mice_numeric <- do.call(cbind, lapply(X_mice_complete, as.numeric))
-  
-  X_init <- matrix(NA, nrow = nrow(jags_data$X), ncol = ncol(jags_data$X))
-  
-  is_missing <- is.na(jags_data$X)
-  
-  X_init[is_missing] <- X_mice_numeric[is_missing]
-  
-  return(list(X = X_init))
-}
+# Initialize function for JAGS will be defined inside process_sample
 
 # Function to process a single sample
 process_sample <- function(i) {
@@ -128,38 +118,37 @@ process_sample <- function(i) {
 
   X_matrix <- as.matrix(sample_data[, c("x1", "x2", "x3", "x4", "x5", "x6")])
   
-  with(as.list(params_miss), {
-    logit_p_miss_x1 <- nr_int_1 + X_matrix %*% nr_beta_1
-    p_miss_x1 <- plogis(logit_p_miss_x1)
-    is_missing_x1 <- rbinom(nrow(sample_data), 1, p_miss_x1)
-    sample_data$x1[is_missing_x1 == 1] <<- NA
+  # Generate missingness indicators
+  logit_p_miss_x1 <- params_miss$nr_int_1 + X_matrix %*% params_miss$nr_beta_1
+  p_miss_x1 <- plogis(logit_p_miss_x1)
+  is_missing_x1 <- rbinom(nrow(sample_data), 1, p_miss_x1)
+  sample_data$x1[is_missing_x1 == 1] <- NA
   
-    logit_p_miss_x2 <- nr_int_2 + X_matrix %*% nr_beta_2
-    p_miss_x2 <- plogis(logit_p_miss_x2)
-    is_missing_x2 <- rbinom(nrow(sample_data), 1, p_miss_x2)
-    sample_data$x2[is_missing_x2 == 1] <<- NA
+  logit_p_miss_x2 <- params_miss$nr_int_2 + X_matrix %*% params_miss$nr_beta_2
+  p_miss_x2 <- plogis(logit_p_miss_x2)
+  is_missing_x2 <- rbinom(nrow(sample_data), 1, p_miss_x2)
+  sample_data$x2[is_missing_x2 == 1] <- NA
   
-    # MAR: x3, x4, x5, x6
-    logit_p_miss_x3 <- nr_int_3 + X_matrix[, -3] %*% nr_beta_3
-    p_miss_x3 <- plogis(logit_p_miss_x3)
-    is_missing_x3 <- rbinom(nrow(sample_data), 1, p_miss_x3)
-    sample_data$x3[is_missing_x3 == 1] <<- NA
+  # MAR: x3, x4, x5, x6
+  logit_p_miss_x3 <- params_miss$nr_int_3 + X_matrix[, -3] %*% params_miss$nr_beta_3
+  p_miss_x3 <- plogis(logit_p_miss_x3)
+  is_missing_x3 <- rbinom(nrow(sample_data), 1, p_miss_x3)
+  sample_data$x3[is_missing_x3 == 1] <- NA
   
-    logit_p_miss_x4 <- nr_int_4 + X_matrix[, -4] %*% nr_beta_4
-    p_miss_x4 <- plogis(logit_p_miss_x4)
-    is_missing_x4 <- rbinom(nrow(sample_data), 1, p_miss_x4)
-    sample_data$x4[is_missing_x4 == 1] <<- NA
+  logit_p_miss_x4 <- params_miss$nr_int_4 + X_matrix[, -4] %*% params_miss$nr_beta_4
+  p_miss_x4 <- plogis(logit_p_miss_x4)
+  is_missing_x4 <- rbinom(nrow(sample_data), 1, p_miss_x4)
+  sample_data$x4[is_missing_x4 == 1] <- NA
   
-    logit_p_miss_x5 <- nr_int_5 + X_matrix[, -5] %*% nr_beta_5
-    p_miss_x5 <- plogis(logit_p_miss_x5)
-    is_missing_x5 <- rbinom(nrow(sample_data), 1, p_miss_x5)
-    sample_data$x5[is_missing_x5 == 1] <<- NA
+  logit_p_miss_x5 <- params_miss$nr_int_5 + X_matrix[, -5] %*% params_miss$nr_beta_5
+  p_miss_x5 <- plogis(logit_p_miss_x5)
+  is_missing_x5 <- rbinom(nrow(sample_data), 1, p_miss_x5)
+  sample_data$x5[is_missing_x5 == 1] <- NA
   
-    logit_p_miss_x6 <- nr_int_6 + X_matrix[, -6] %*% nr_beta_6
-    p_miss_x6 <- plogis(logit_p_miss_x6)
-    is_missing_x6 <- rbinom(nrow(sample_data), 1, p_miss_x6)
-    sample_data$x6[is_missing_x6 == 1] <<- NA
-  })
+  logit_p_miss_x6 <- params_miss$nr_int_6 + X_matrix[, -6] %*% params_miss$nr_beta_6
+  p_miss_x6 <- plogis(logit_p_miss_x6)
+  is_missing_x6 <- rbinom(nrow(sample_data), 1, p_miss_x6)
+  sample_data$x6[is_missing_x6 == 1] <- NA
   
   sample_result <- sample_data |> select(W, x1, x2, x3, x4, x5, x6) 
   
@@ -176,7 +165,7 @@ process_sample <- function(i) {
   sample_data_for_mice$r5 = is_missing_x5
   sample_data_for_mice$r6 = is_missing_x6
 
-  total_imputations_mice <- L*10
+  total_imputations_mice <- L
   
   sample_imp = mice(sample_data_for_mice, m = total_imputations_mice)
   mice_ALL_complete = complete(sample_imp, "long")
@@ -212,6 +201,21 @@ process_sample <- function(i) {
   jags_data$T2_known <- sum(pop_data$x2)
   jags_data$V1_known <- V_x1_pop_HT
   jags_data$V2_known <- V_x2_pop_HT
+  
+  # Initialize function for JAGS
+  inits_function <- function() {
+    mice_imp <- mice(jags_data$X, m = 1, maxit = 5, printFlag = FALSE)
+    X_mice_complete <- complete(mice_imp)
+    X_mice_numeric <- do.call(cbind, lapply(X_mice_complete, as.numeric))
+    
+    X_init <- matrix(NA, nrow = nrow(jags_data$X), ncol = ncol(jags_data$X))
+    
+    is_missing <- is.na(jags_data$X)
+    
+    X_init[is_missing] <- X_mice_numeric[is_missing]
+    
+    return(list(X = X_init))
+  }
   
   # jags model setup
   params_to_save <- c(
@@ -274,21 +278,32 @@ process_sample <- function(i) {
   )
   
   imputed_X_array <- jags_imputations$sims.list$X
-  n_total_imputations <- dim(imputed_X_array)[1]
+  
+  # Total imputations generated is (L * n_chains)
+  n_total_generated <- dim(imputed_X_array)[1] 
+  
   W_col <- sample_data$W
   imputations_list <- list()
   
-  for (j in 1:n_total_imputations) {
-    imp_matrix <- imputed_X_array[j, , ]
+  # Get L evenly spaced indices from the total pool
+  # This "thins" the samples and gives you exactly L
+  indices_to_save <- round(seq(1, n_total_generated, length.out = L))
+
+  for (j in 1:L) { # Loop exactly L times
+    
+    # Get the j-th index from our spaced-out list
+    imp_index <- indices_to_save[j] 
+    
+    imp_matrix <- imputed_X_array[imp_index, , ] 
     imp_df <- as.data.frame(imp_matrix)
     colnames(imp_df) <- c("x1", "x2", "x3", "x4", "x5", "x6")
     imp_df$W <- W_col
-    imp_df <- imp_df[, c("W", "x1", "x2", "x3", "x4", "x5", "x6")]
+    imp_df <- imp_df[, c("W", "x1","x2", "x3", "x4", "x5", "x6")]
     imputations_list[[j]] <- imp_df
   }
   
   jags_result <- imputations_list
-  print(paste("Stored", n_total_imputations, "JAGS imputations for sample", i))
+  print(paste("Stored", L, "JAGS imputations for sample", i)) # Prints L
   
   #############################################################################
   ##################### PLOT GENERATION #######################################
@@ -420,12 +435,8 @@ if (n_chains > 1) {
 print(paste("Using", outer_cores, "cores for parallel processing"))
 print(paste("JAGS will use", n_chains, "chains internally"))
 
-# Run samples in parallel
-if (outer_cores > 1) {
-  results_list <- mclapply(1:n_samp, process_sample, mc.cores = outer_cores)
-} else {
-  results_list <- lapply(1:n_samp, process_sample)
-}
+# Run samples sequentially for debugging
+results_list <- lapply(1:n_samp, process_sample)
 
 # Extract results from parallel processing
 SAMPLES <- list()
