@@ -53,38 +53,23 @@ print(paste("Pop params path:", pop_params_path))
 print(paste("Missingness params path:", miss_params_path))
 print(paste("This job is processing sample_index:", sample_index)) # <-- NEW PRINT
 
-# get seed from command line when batch the code
-set.seed(456)
-
-df <- read.csv(paste0("data/",csv_path, ".csv"))
-N_pop <- nrow(df)
-param_list_pop <- readRDS(paste0("params/",pop_params_path,".rds"))
+# --- Load missingness parameters (params_miss) ---
 params_miss <- readRDS(paste0("params/", miss_params_path,".rds"))
 
-# create folder for results
+# --- Define folder path ---
 folder_name <- sprintf("pop-%s-miss-%s-n_samp-%d-L-%d-data-%s-chains-%d-burnin-%d-iter-%d", 
                        pop_params_path, miss_params_path, n_samp, L, csv_path, n_chains, n_burnin, n_iter)
 
-print(paste("Creating results folder:", folder_name))
-dir.create(folder_name, recursive = TRUE, showWarnings = FALSE)
-
-# Generate population data sequentially
-pop_data <- data.frame(id = 1:N_pop)
-pop_data$W <- 10*df$PWGTP
-pop_data$sampling_prob <- 1/pop_data$W
-
-with(as.list(param_list_pop), {
-  pop_data$x1 <<- rbinom(N_pop, 1, plogis(a1 + b1w * pop_data$W))
-  pop_data$x2 <<- rbinom(N_pop, 1, plogis(a2 + b21 * pop_data$x1))
-  pop_data$x3 <<- rbinom(N_pop, 1, plogis(a3 + b31 * pop_data$x1 + b32 * pop_data$x2))
-  pop_data$x4 <<- rbinom(N_pop, 1, plogis(a4 + b41 * pop_data$x1 + b42 * pop_data$x2 + b43 * pop_data$x3))
-  pop_data$x5 <<- rnorm(N_pop, a5 + b51 * pop_data$x1 + b52 * pop_data$x2 + b53 * pop_data$x3 + b54 * pop_data$x4, s5)
-  pop_data$x6 <<- rnorm(N_pop, a6 + b61 * pop_data$x1 + b62 * pop_data$x2 + b63 * pop_data$x3 +  b64 * pop_data$x4 + b65 * pop_data$x5, s6)
-})
+# --- Load Pre-Generated Population Data ---
+# All generation code is removed. We just load the file.
 
 pop_save_path <- file.path(folder_name, "population_data.rds")
-print(paste("Saving population data to:", pop_save_path))
-saveRDS(pop_data, file = pop_save_path)
+print(paste("Loading pre-generated population data from:", pop_save_path))
+
+pop_data <- readRDS(pop_save_path)
+N_pop <- nrow(pop_data) # Get N_pop from the loaded data
+print("Population data loaded.")
+# ---
 
 T1_known = sum(pop_data$x1)
 T2_known = sum(pop_data$x2)
@@ -281,21 +266,32 @@ process_sample <- function(i) {
   )
   
   imputed_X_array <- jags_imputations$sims.list$X
-  n_total_imputations <- dim(imputed_X_array)[1]
+  
+  # Total imputations generated is (L * n_chains)
+  n_total_generated <- dim(imputed_X_array)[1] 
+  
   W_col <- sample_data$W
   imputations_list <- list()
   
-  for (j in 1:n_total_imputations) {
-    imp_matrix <- imputed_X_array[j, , ]
+  # Get L evenly spaced indices from the total pool
+  # This "thins" the samples and gives you exactly L
+  indices_to_save <- round(seq(1, n_total_generated, length.out = L))
+
+  for (j in 1:L) { # Loop exactly L times
+    
+    # Get the j-th index from our spaced-out list
+    imp_index <- indices_to_save[j] 
+    
+    imp_matrix <- imputed_X_array[imp_index, , ] 
     imp_df <- as.data.frame(imp_matrix)
     colnames(imp_df) <- c("x1", "x2", "x3", "x4", "x5", "x6")
     imp_df$W <- W_col
-    imp_df <- imp_df[, c("W", "x1", "x2", "x3", "x4", "x5", "x6")]
+    imp_df <- imp_df[, c("W", "x1","x2", "x3", "x4", "x5", "x6")]
     imputations_list[[j]] <- imp_df
   }
   
   jags_result <- imputations_list
-  print(paste("Stored", n_total_imputations, "JAGS imputations for sample", i))
+  print(paste("Stored", L, "JAGS imputations for sample", i)) # Prints L
   
   #############################################################################
   ##################### PLOT GENERATION #######################################
