@@ -52,15 +52,15 @@ for (i in 1:n_samp) {
 
 # Save the final aggregated lists
 print("Saving aggregated SAMPLES list...")
-samples_save_path <- file.path(folder_name, "samples_list.rds")
+samples_save_path <- file.path(folder_name, "AGG_SAMPLES.rds")
 saveRDS(SAMPLES, file = samples_save_path)
 
 print("Saving aggregated MICE_RESULTS list...")
-mice_results_save_path <- file.path(folder_name, "mice_results_list.rds")
+mice_results_save_path <- file.path(folder_name, "AGG_MICE_RESULTS.rds")
 saveRDS(MICE_RESULTS, file = mice_results_save_path)
 
 print("Saving aggregated JAGS_RESULTS list...")
-jags_results_save_path <- file.path(folder_name, "jags_results_list.rds")
+jags_results_save_path <- file.path(folder_name, "AGG_JAGS_RESULTS.rds")
 saveRDS(JAGS_RESULTS, file = jags_results_save_path)
 
 print("All aggregation complete!")
